@@ -51,3 +51,14 @@ lark-cli 的钥匙串在 SSH/非交互环境下取不到），Mac 只当开发�
 `huaman-dashboard.html` + `assets/{app,charts}.js` 是页面本体；
 `assets/data.js` **由脚本生成，不要手改**（下一次跑脚本会被覆盖）。
 改完记得让 `index.html` 跟 `huaman-dashboard.html` 一致，否则 Pages 入口会停在旧版。
+
+## 国内访问（中转加速）
+
+GitHub Pages 在国内需要梯子。镜像走 Cloudflare Worker 反代：`cloudflare/worker.js`
+（上游仍是 GitHub Pages，站点用相对路径，原样转发即可，无需改写 HTML）。
+自定义域建议 `huaman.myhub.site`，部署脚本见 `cloudflare/deploy.sh`。
+
+⚠️ **`myhub.site` 上已有的 github.myhub.site 是 gh-proxy（hunshcn/gh-proxy）**，它只认
+`github.com/{releases,archive,blob,raw,info,git-,tags}/…`、`raw.githubusercontent.com/…`、
+`gist.github.com/…` 这几类路径；**其它路径会被它转发到它自己的项目主页**，
+所以拿它代理 `*.github.io` 站点只会得到一个 GitHub Pages 的 404 页。镜像必须用独立 Worker + 子域。
