@@ -62,3 +62,19 @@ GitHub Pages 在国内需要梯子。镜像走 Cloudflare Worker 反代：`cloud
 `github.com/{releases,archive,blob,raw,info,git-,tags}/…`、`raw.githubusercontent.com/…`、
 `gist.github.com/…` 这几类路径；**其它路径会被它转发到它自己的项目主页**，
 所以拿它代理 `*.github.io` 站点只会得到一个 GitHub Pages 的 404 页。镜像必须用独立 Worker + 子域。
+
+## Cloudflare 部署（国内访问）
+
+Cloudflare 用 **Workers 静态资源**模式（CF 已把新项目都收到 Workers 下，Pages 只做维护）：
+
+| 设置项 | 值 |
+|---|---|
+| Git 仓库 / 生产分支 | `chenweiask/huaman-dashboard` / `main` |
+| Build command | `bash build.sh` |
+| Deploy command | `npx wrangler deploy` |
+| 非生产分支命令（Preview） | `npx wrangler versions upload` |
+| Root directory（Path） | `/` |
+
+`bash build.sh` 产出 `dist/`，`wrangler.jsonc` 里的 `assets.directory` 指向它；
+`npx wrangler deploy` 把 `dist/` 上传成静态资源 Worker。推到 `main` 即自动重建，
+所以数据更新链路是：cron → 推 GitHub → CF 自动构建 → 镜像生效，不需要额外的部署步骤。

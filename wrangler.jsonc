@@ -1,0 +1,13 @@
+{
+  // Cloudflare Workers（静态资源模式）构建/部署配置
+  //   Build command: bash build.sh         → 产出 dist/
+  //   Deploy command: npx wrangler deploy  → 把 dist/ 上传成静态资源 Worker
+  // Worker 名字必须和 Cloudflare 上的项目名一致
+  "name": "huaman-dashboard",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./dist",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none"
+  }
+}
