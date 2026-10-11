@@ -337,6 +337,18 @@ def main():
     data_js.write_text(out, encoding='utf-8')
 
     # 7. 重新生成单文件版
+    standalone()
+
+    print(f"UPDATED 截至 {dates[-1]} | 成员 {len(member_list)} | 日 {len(daily)} | 活动 {len(activities)}")
+    return True
+
+
+def standalone():
+    """把 huaman-dashboard.html + _shared + assets 全内联成单文件版。
+
+    数据无变化时 main() 会提前返回，所以改了前端之后单独跑：
+        python3 scripts/fetch_and_build.py --standalone
+    """
     html = (ROOT / 'huaman-dashboard.html').read_text(encoding='utf-8')
     for fn in ['Outfit-Regular.ttf', 'Outfit-Bold.ttf', 'JetBrainsMono-Regular.ttf', 'JetBrainsMono-Bold.ttf']:
         b64 = base64.b64encode((ROOT / '_shared/fonts' / fn).read_bytes()).decode()
@@ -346,11 +358,13 @@ def main():
         content = (ROOT / src.replace('./', '')).read_text(encoding='utf-8')
         html = html.replace(tag, '<script>\n' + content + '\n</script>')
     (ROOT / '花满天下数据仪表盘-单文件版.html').write_text(html, encoding='utf-8')
+    print('STANDALONE 单文件版已重建')
 
-    print(f"UPDATED 截至 {dates[-1]} | 成员 {len(member_list)} | 日 {len(daily)} | 活动 {len(activities)}")
-    return True
 
 if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == '--standalone':
+        standalone()
+        sys.exit(0)
     try:
         changed = main()
         sys.exit(0 if changed else 2)  # 2 = 无变化
