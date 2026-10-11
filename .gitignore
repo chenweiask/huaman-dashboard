@@ -3,3 +3,4 @@ scripts/notify.log
 scripts/.local.env
 /tmp/
 .DS_Store
+dist/
