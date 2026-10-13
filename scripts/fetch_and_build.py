@@ -17,13 +17,15 @@ API_BASE = 'https://open.feishu.cn'
 EPOCH = date(1899, 12, 30)
 LEGACY_SHEET = 'NtKosgeLWh8naMtl73KcF2GwnSh'   # 仅表格标识（非密钥），读数据仍需应用凭据
 
-# 页签名 → (sheet_id, 读取范围, 日期列, 预期列数)
-# ⚠️ 范围必须够大：行数已破 400，写 A1:K400 会静默丢人（见 game-data-daily-update skill）
+# 页签名 → (sheet_id, 最少读取行数, 日期列, 预期列数)
+# ⚠️ 读取行数由 metainfo 的 rowCount 动态决定（见 sheet_range），**不要再硬编码行数**：
+#    2026-10-13 表行数突破 2000，写死 A1:K2000 时静默丢了当天最后 50 人（页面显示 49 人）。
 SHEETS = {
-    '成员数据': ('c7b925', 'A1:K2000', [0], 11),
-    '功勋累计': ('2FckUN', 'A1:N2000', [7, 8], 14),
-    '活动明细': ('3lbxIY', 'A1:E2000', [0], 5),
+    '成员数据': ('c7b925', 2000, [0], 11),
+    '功勋累计': ('2FckUN', 2000, [7, 8], 14),
+    '活动明细': ('3lbxIY', 2000, [0], 5),
 }
+GRID_FALLBACK = 20000   # metainfo 取不到时的兜底行数（宁大勿小）
 
 
 def sheet_token():
@@ -36,6 +38,35 @@ def sheet_token():
             if line.strip().startswith('HUAMAN_SPREADSHEET='):
                 return line.split('=', 1)[1].strip().strip('"\'')
     return LEGACY_SHEET
+
+
+_grid_cache = {}          # sheet_id → rowCount
+_grid_fallback = set()    # metainfo 取不到、走了兜底行数的 sheet_id
+
+
+def grid_rowcount(sid):
+    """页签网格行数（= 表能装的最大行数）。表写入超界时飞书会自动扩网格，所以它 ≥ 数据末行。"""
+    if sid in _grid_cache:
+        return _grid_cache[sid]
+    n = GRID_FALLBACK
+    try:
+        url = '%s/open-apis/sheets/v2/spreadsheets/%s/metainfo' % (API_BASE, sheet_token())
+        req = urllib.request.Request(url)
+        req.add_header('Authorization', 'Bearer ' + tenant_token())
+        d = json.loads(urllib.request.urlopen(req, timeout=30).read())
+        for s in (d.get('data') or {}).get('sheets') or []:
+            if s.get('sheetId') == sid and s.get('rowCount'):
+                n = int(s['rowCount'])
+    except Exception as e:  # 拿不到就用兜底行数，宁大勿小
+        _grid_fallback.add(sid)
+        print('（[%s] metainfo 读取失败，用兜底行数 %d：%s）' % (sid, n, e), file=sys.stderr)
+    _grid_cache[sid] = n
+    return n
+
+
+def sheet_range(sid, ncol, min_rows):
+    last = max(int(min_rows), grid_rowcount(sid))
+    return 'A1:%s%d' % (chr(ord('A') + ncol - 1), last)
 
 
 def env_file():
@@ -92,7 +123,8 @@ def quote(s):
 
 def fetch_api(sheet):
     """飞书 API → 与 lark-cli 同构的 annotated_csv，下游 build 逻辑对两者一视同仁。"""
-    sid, rng, date_cols, ncol = SHEETS[sheet]
+    sid, min_rows, date_cols, ncol = SHEETS[sheet]
+    rng = sheet_range(sid, ncol, min_rows)
     url = '%s/open-apis/sheets/v2/spreadsheets/%s/values/%s?valueRenderOption=UnformattedValue' % (
         API_BASE, sheet_token(), urllib.parse.quote(sid + '!' + rng, safe=''))
     req = urllib.request.Request(url)
@@ -100,8 +132,9 @@ def fetch_api(sheet):
     d = json.loads(urllib.request.urlopen(req, timeout=60).read())
     if d.get('code') != 0:
         raise RuntimeError('读[%s]失败 code=%s msg=%s' % (sheet, d.get('code'), d.get('msg')))
+    values = d['data']['valueRange']['values']
     lines = []
-    for i, row in enumerate(d['data']['valueRange']['values'], 1):
+    for i, row in enumerate(values, 1):
         row = list(row)
         for c in date_cols:
             if c < len(row):
@@ -114,6 +147,10 @@ def fetch_api(sheet):
         lines.append('[row=%d]%s' % (i, ','.join(quote(f) for f in fields)))
     if len(lines) < 2:
         raise RuntimeError('[%s] 只读到表头 —— 表格结构变了或应用没有该表格权限' % sheet)
+    # 截断自检：只有走兜底行数时才有被吞的风险（用 rowCount 时范围必然覆盖全表）
+    if sid in _grid_fallback and values and any(str(v).strip() for v in values[-1]):
+        print('⚠️ [%s] 数据顶到读取范围最后一行（%s），可能有行被吞掉，请检查 metainfo.rowCount'
+              % (sheet, rng), file=sys.stderr)
     return '\n'.join(lines) + '\n'
 
 
