@@ -28,6 +28,18 @@ fi
 
 OUT="$(python3 scripts/fetch_and_build.py 2>&1)"; rc=$?
 echo "$OUT"
+# 数据自检告警（人数突降等）：同一条告警只推一次，避免每小时刷屏
+WARN="$(echo "$OUT" | grep '^WARN' | head -1)"
+if [ -n "$WARN" ]; then
+  STAMP="$DIR/scripts/.warn-notified"
+  if [ "$(cat "$STAMP" 2>/dev/null)" != "$WARN" ]; then
+    printf '%s' "$WARN" > "$STAMP"
+    log "⚠️ $WARN"
+    notify "仪表盘数据异常" "$WARN"
+  fi
+else
+  rm -f "$DIR/scripts/.warn-notified"
+fi
 if [ $rc -eq 1 ]; then
   log "拉取/构建失败，终止"
   notify "仪表盘更新失败" "$(echo "$OUT" | tail -3 | tr '\n' ' ')"

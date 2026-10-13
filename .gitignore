@@ -1,6 +1,7 @@
 scripts/update.log
 scripts/notify.log
 scripts/.local.env
+scripts/.warn-notified
 __pycache__/
 /tmp/
 .DS_Store

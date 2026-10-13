@@ -243,6 +243,15 @@ def main():
         })
         prev_total = tot
 
+    # 1b. 人数突变自检：最新一天比前一天少一大截 = 多半是取数/导入被截断（2026-10-13 事故：
+    #     范围写死 A1:K2000，当天 99 人只读到前 49 人，页面显示「在册成员 49 人」）。
+    if len(daily) >= 2:
+        cur, prev = daily[-1]['members'], daily[-2]['members']
+        if prev and cur <= prev * 0.8 and prev - cur >= 10:
+            print('WARN 人数突降：%s %d 人 → %s %d 人（前一天 %d）。'
+                  '先核对飞书表当天行数与 metainfo.rowCount，确认不是取数被截断。'
+                  % (daily[-2]['full'], prev, daily[-1]['full'], cur, prev))
+
     def parse_date(s): return datetime.strptime(s, '%Y/%m/%d')
     def week_start(dt): return dt - timedelta(days=dt.weekday())
 
