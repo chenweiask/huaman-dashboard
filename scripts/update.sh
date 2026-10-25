@@ -21,7 +21,7 @@ notify() {   # 机器无关的告警：Mac 弹系统通知，Linux 走 hermes se
 log "===== 开始更新 ====="
 
 # GitHub 是唯一真源：先同步远端（本地临时改动自动 stash，防止定时任务卡死）
-if ! git pull --rebase --autostash -q origin main; then
+if ! timeout 45 git pull --rebase --autostash -q origin main; then
   log "pull 失败（网络/凭据），改用本地版本继续"
   git rebase --abort 2>/dev/null
 fi
@@ -64,10 +64,25 @@ if ! git commit -q -m "data: 更新至 ${DATA_DATE}"; then
   notify "仪表盘提交失败" "git commit 失败，检查仓库的 git 身份配置"
   exit 1
 fi
-if git push -q origin main; then
+PUSH_OK=0
+for i in 1 2 3; do
+  if timeout 45 git push -q origin main; then PUSH_OK=1; break; fi
+  log "推送失败（第 ${i} 次）"
+  [ $i -lt 3 ] && sleep $((i * 20))
+done
+if [ $PUSH_OK -eq 1 ]; then
   log "推送成功（数据截至 ${DATA_DATE}），GitHub Pages 约 1 分钟后生效"
+  rm -f "$DIR/scripts/.pushfail-notified"
 else
-  log "推送失败"
-  notify "仪表盘推送失败" "已提交但推送失败，请检查凭据/网络"
+  log "推送失败（已重试 3 次）"
+  # 同一个故障每天只提醒一次，避免每小时刷屏
+  STAMP="$DIR/scripts/.pushfail-notified"
+  TODAY="$(date '+%F')"
+  if [ "$(cat "$STAMP" 2>/dev/null)" != "$TODAY" ]; then
+    printf '%s' "$TODAY" > "$STAMP"
+    notify "仪表盘推送失败" "已提交但推送失败（github.com:443 连不上），本地已累积待推送提交"
+  else
+    log "今日已提醒过，不再重复推送告警"
+  fi
   exit 1
 fi
