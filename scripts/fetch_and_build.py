@@ -16,28 +16,89 @@ TMP.mkdir(parents=True, exist_ok=True)
 API_BASE = 'https://open.feishu.cn'
 EPOCH = date(1899, 12, 30)
 LEGACY_SHEET = 'NtKosgeLWh8naMtl73KcF2GwnSh'   # 仅表格标识（非密钥），读数据仍需应用凭据
+LEGACY_IDS = {'成员数据': 'c7b925', '功勋累计': '2FckUN', '活动明细': '3lbxIY'}
 
-# 页签名 → (sheet_id, 最少读取行数, 日期列, 预期列数)
+# 页签名 → (最少读取行数, 日期列, 预期列数)；sheet_id 由赛季配置决定（见 season_source）
 # ⚠️ 读取行数由 metainfo 的 rowCount 动态决定（见 sheet_range），**不要再硬编码行数**：
 #    2026-10-13 表行数突破 2000，写死 A1:K2000 时静默丢了当天最后 50 人（页面显示 49 人）。
-SHEETS = {
-    '成员数据': ('c7b925', 2000, [0], 11),
-    '功勋累计': ('2FckUN', 2000, [7, 8], 14),
-    '活动明细': ('3lbxIY', 2000, [0], 5),
+SHEET_COLS = {
+    '成员数据': (2000, [0], 11),
+    '功勋累计': (2000, [7, 8], 14),
+    '活动明细': (2000, [0], 5),
 }
+SHEET_KEYS = {'成员数据': 'members', '功勋累计': 'ledger', '活动明细': 'details'}
+SEASON_FILE = pathlib.Path.home() / 'tmp' / 'season.json'
+_SEASON = {}
 GRID_FALLBACK = 20000   # metainfo 取不到时的兜底行数（宁大勿小）
+
+
+def _season_cfg():
+    try:
+        return json.loads(SEASON_FILE.read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+
+
+def _has_data(token, sid):
+    """该赛季「成员数据」是否有数据行（只有表头 = 还没开赛，不能当数据源）。"""
+    url = '%s/open-apis/sheets/v2/spreadsheets/%s/values/%s?valueRenderOption=UnformattedValue' % (
+        API_BASE, token, urllib.parse.quote(sid + '!A1:B4', safe=''))
+    try:
+        req = urllib.request.Request(url)
+        req.add_header('Authorization', 'Bearer ' + tenant_token())
+        d = json.loads(urllib.request.urlopen(req, timeout=30).read())
+        if d.get('code') != 0:
+            return False
+        vals = ((d.get('data') or {}).get('valueRange') or {}).get('values') or []
+        return any(any(str(v).strip() for v in (r or []) if v is not None) for r in vals[1:])
+    except Exception:
+        return False
+
+
+def season_source():
+    """返回 (表格 token, {页签名: sheet_id}, 赛季名)。
+
+    数据源 = ~/tmp/season.json 的 current 赛季；但它「成员数据」还没有数据行时
+    自动回退到上一个有数据的赛季 —— 新赛季首日导入前网页继续显示上季，导入后自动切过去。
+    """
+    if _SEASON:
+        return _SEASON['token'], _SEASON['ids'], _SEASON['name']
+    token, ids, name = LEGACY_SHEET, dict(LEGACY_IDS), 'S7'
+    cfg = _season_cfg()
+    seasons = cfg.get('seasons') or {}
+    cur = cfg.get('current')
+    for sn in [x for x in [cur] + [k for k in seasons if k != cur] if x and x in seasons]:
+        conf = seasons[sn]
+        tok = conf.get('token')
+        sh = conf.get('sheets') or {}
+        if not tok or not sh.get('members'):
+            continue
+        if not _has_data(tok, sh['members']):
+            log_season_skip(sn)
+            continue
+        token = tok
+        ids = {k: sh.get(v) for k, v in SHEET_KEYS.items()}
+        name = sn
+        break
+    _SEASON.update(token=token, ids=ids, name=name)
+    return token, ids, name
+
+
+def log_season_skip(sn):
+    sys.stderr.write('ℹ️  赛季 %s 的成员数据还没有任何数据行，跳过（继续用上一季）\n' % sn)
 
 
 def sheet_token():
     t = os.environ.get('HUAMAN_SPREADSHEET', '').strip()
-    if t:
+    if t:                       # 手动覆盖（调试用）
         return t
-    local = ROOT / 'scripts' / '.local.env'
-    if local.exists():
-        for line in local.read_text(encoding='utf-8').splitlines():
-            if line.strip().startswith('HUAMAN_SPREADSHEET='):
-                return line.split('=', 1)[1].strip().strip('"\'')
-    return LEGACY_SHEET
+    return season_source()[0]
+
+
+def sheet_spec(sheet):
+    """(sheet_id, 最少读取行数, 日期列, 预期列数)"""
+    min_rows, date_cols, ncol = SHEET_COLS[sheet]
+    return (season_source()[1].get(sheet) or LEGACY_IDS[sheet]), min_rows, date_cols, ncol
 
 
 _grid_cache = {}          # sheet_id → rowCount
@@ -123,7 +184,7 @@ def quote(s):
 
 def fetch_api(sheet):
     """飞书 API → 与 lark-cli 同构的 annotated_csv，下游 build 逻辑对两者一视同仁。"""
-    sid, min_rows, date_cols, ncol = SHEETS[sheet]
+    sid, min_rows, date_cols, ncol = sheet_spec(sheet)
     rng = sheet_range(sid, ncol, min_rows)
     url = '%s/open-apis/sheets/v2/spreadsheets/%s/values/%s?valueRenderOption=UnformattedValue' % (
         API_BASE, sheet_token(), urllib.parse.quote(sid + '!' + rng, safe=''))
