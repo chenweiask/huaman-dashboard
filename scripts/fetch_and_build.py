@@ -207,7 +207,11 @@ def fetch_api(sheet):
             fields.append('')
         lines.append('[row=%d]%s' % (i, ','.join(quote(f) for f in fields)))
     if len(lines) < 2:
-        raise RuntimeError('[%s] 只读到表头 —— 表格结构变了或应用没有该表格权限' % sheet)
+        if sheet == '成员数据':
+            raise RuntimeError('[%s] 只读到表头 —— 表格结构变了或应用没有该表格权限' % sheet)
+        # 新赛季首日 / 本季还没打过活动时，活动明细或功勋累计可能只有表头，属正常
+        sys.stderr.write('\u2139\ufe0f  [%s] 只有表头（本赛季还没有数据），按空表处理\n' % sheet)
+        return '\n'.join(lines) + '\n'
     # 截断自检：只有走兜底行数时才有被吞的风险（用 rowCount 时范围必然覆盖全表）
     if sid in _grid_fallback and values and any(str(v).strip() for v in values[-1]):
         print('⚠️ [%s] 数据顶到读取范围最后一行（%s），可能有行被吞掉，请检查 metainfo.rowCount'
